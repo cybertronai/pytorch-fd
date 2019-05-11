@@ -1,0 +1,77 @@
+"""Lamb optimizer."""
+
+import collections
+import math
+
+import torch
+import torch.optim as optim
+from tensorboardX import SummaryWriter
+
+class FDLR(optim.lr_scheduler._LRScheduler):
+    """Decays the learning rate of each parameter group by gamma every
+    step_size epochs. Notice that such decay can happen simultaneously with
+    other changes to the learning rate from outside this scheduler. When
+    last_epoch=-1, sets initial lr as lr.
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        step_size (int): Period of learning rate decay.
+        gamma (float): Multiplicative factor of learning rate decay.
+            Default: 0.1.
+        last_epoch (int): The index of last epoch. Default: -1.
+
+    Example:
+        >>> # Assuming optimizer uses lr = 0.05 for all groups
+        >>> # lr = 0.05     if epoch < 30
+        >>> # lr = 0.005    if 30 <= epoch < 60
+        >>> # lr = 0.0005   if 60 <= epoch < 90
+        >>> # ...
+        >>> scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+        >>> for epoch in range(100):
+        >>>     train(...)
+        >>>     validate(...)
+        >>>     scheduler.step()
+    """
+
+    def __init__(self, optimizer, epsilon=.01, gamma=0.1, last_epoch=-1, writer: SummaryWriter = None, use_mom=False):
+        self.epsilon = epsilon
+        self.gamma = gamma
+        self.writer = writer
+        self.use_mom = use_mom
+        super(FDLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch == 0:
+            return self.base_lrs
+        ols, ors, ratios = [], [], []
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                if self.use_mom:
+                    state = self.optimizer.state[p]
+                    exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                    beta1, beta2 = group['betas']
+                    bias_correction1 = 1 - beta1 ** state['step']
+                    bias_correction2 = 1 - beta2 ** state['step']
+                    ol = torch.dot(p.data.view(-1), (exp_avg.view(-1))) / bias_correction1
+                    # subtract first moment from p.data?
+                    or_ = torch.mean(.5 * group['lr'] * (exp_avg_sq / bias_correction2))
+                else:
+                    grad = p.grad.data
+                    ol = torch.dot(p.data.view(-1), (grad.view(-1)))
+                    or_ = .5 * group['lr'] * grad.pow(2).mean()
+                ratio = ol / or_ - 1
+                ols.append(ol)
+                ors.append(or_)
+                ratios.append(ratio)
+        if self.writer:
+            for data, label in ((ols, 'ol'), (ors, 'or'), (ratios, 'ratio')):
+                tensor = torch.tensor(data)
+                self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
+                self.writer.add_scalar(f'fd/{label}', tensor.mean(), self.last_epoch)
+        if torch.tensor(ratios).mean().abs() < self.epsilon:
+            factor = self.gamma
+        else:
+            factor = 1
+        return [group['lr'] * factor
+                for group in self.optimizer.param_groups]
+

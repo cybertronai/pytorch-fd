@@ -7,11 +7,12 @@ from __future__ import print_function
 import argparse
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import torch.nn.functional as F
 import tqdm
 from tensorboardX import SummaryWriter
 from torchvision import datasets, transforms
-from pytorch_lamb import Lamb, log_lamb_rs
+from pytorch_fd import FDLR
 
 
 class Net(nn.Module):
@@ -32,7 +33,7 @@ class Net(nn.Module):
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
     
-def train(args, model, device, train_loader, optimizer, epoch, event_writer):
+def train(args, model, device, train_loader, optimizer, epoch, event_writer, scheduler):
     model.train()
     tqdm_bar = tqdm.tqdm(train_loader)
     for batch_idx, (data, target) in enumerate(tqdm_bar):
@@ -43,9 +44,10 @@ def train(args, model, device, train_loader, optimizer, epoch, event_writer):
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
+            scheduler.step() # TODO: step properly
             step = batch_idx * len(data) + (epoch-1) * len(train_loader.dataset)
-            log_lamb_rs(optimizer, event_writer, step)
-            event_writer.add_scalar('loss', loss.item(), step)
+            event_writer.add_scalar('loss', loss, step)
+            event_writer.add_scalar('lr', optimizer.param_groups[0]['lr'], step)
             tqdm_bar.set_description(
                 f'Train epoch {epoch} Loss: {loss.item():.6f}')
 
@@ -74,16 +76,14 @@ def main():
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
     parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--optimizer', type=str, default='lamb', choices=['lamb', 'adam'],
-                        help='which optimizer to use')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+    parser.add_argument('--scheduler', type=str, default='cosine', choices=['cosine', 'fd', 'step'],
+                        help='which scheduler to use')
+    parser.add_argument('--test-batch-size', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=6, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=0.0025, metavar='LR',
                         help='learning rate (default: 0.0025)')
-    parser.add_argument('--wd', type=float, default=0.01, metavar='WD',
-                        help='weight decay (default: 0.01)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
@@ -111,20 +111,23 @@ def main():
                        ])),
         batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
+    writer = SummaryWriter()
 
     model = Net().to(device)
-    if args.optimizer == 'lamb':
-        # When using extremely high lr such as 0.1, wd helps avoid diverging.
-        # Also use better beta2 from https://www.fast.ai/2018/07/02/adam-weight-decay/
-        optimizer = Lamb(model.parameters(), lr=args.lr, weight_decay=args.wd, betas=(.9, .99))
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
+    if args.scheduler == 'cosine':
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, int(1e6))
+    elif args.scheduler == 'step':
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.1)
     else:
-        # Don't actually use the calculated trust ratio, which makes this equivalent to Adam.
-        optimizer = Lamb(model.parameters(), lr=args.lr, weight_decay=args.wd, betas=(.9, .99), adam=True)
-    writer = SummaryWriter()
-    for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch, writer)
-        test(args, model, device, test_loader, writer, epoch)
+        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=True)
 
+    try:
+        for epoch in range(1, args.epochs + 1):
+            train(args, model, device, train_loader, optimizer, epoch, writer, scheduler)
+            test(args, model, device, test_loader, writer, epoch)
+    except KeyboardInterrupt:
+        print('Exit early')
  
 if __name__ == '__main__':
     main()
