@@ -52,13 +52,13 @@ class FDLR(optim.lr_scheduler._LRScheduler):
                     beta1, beta2 = group['betas']
                     bias_correction1 = 1 - beta1 ** state['step']
                     bias_correction2 = 1 - beta2 ** state['step']
-                    ol = torch.dot(p.data.view(-1), (exp_avg.view(-1))) / bias_correction1
+                    ol = (p.data * exp_avg).sum() / bias_correction1
                     # subtract first moment from p.data?
-                    or_ = torch.mean(.5 * group['lr'] * (exp_avg_sq / bias_correction2))
+                    or_ = (.5 * group['lr'] * (exp_avg_sq / bias_correction2)).sum()
                 else:
                     grad = p.grad.data
-                    ol = torch.dot(p.data.view(-1), (grad.view(-1)))
-                    or_ = .5 * group['lr'] * grad.pow(2).mean()
+                    ol = (p.data * grad).sum()
+                    or_ = .5 * group['lr'] * grad.pow(2).sum()
                 ratio = ol / or_ - 1
                 ols.append(ol)
                 ors.append(or_)
