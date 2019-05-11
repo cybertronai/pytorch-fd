@@ -42,12 +42,12 @@ def train(args, model, device, train_loader, optimizer, epoch, event_writer, sch
         output = model(data)
         loss = F.nll_loss(output, target)
         loss.backward()
+        scheduler.step()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            scheduler.step() # TODO: step properly
-            step = batch_idx * len(data) + (epoch-1) * len(train_loader.dataset)
-            event_writer.add_scalar('loss', loss, step)
-            event_writer.add_scalar('lr', optimizer.param_groups[0]['lr'], step)
+            step = (batch_idx+1) * len(data) + (epoch-1) * len(train_loader.dataset)
+            event_writer.add_scalar('loss', loss, scheduler.last_epoch)
+            event_writer.add_scalar('lr', optimizer.param_groups[0]['lr'], scheduler.last_epoch)
             tqdm_bar.set_description(
                 f'Train epoch {epoch} Loss: {loss.item():.6f}')
 
@@ -77,6 +77,8 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--scheduler', type=str, default='cosine', choices=['cosine', 'fd', 'step'],
+                        help='which scheduler to use')
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'],
                         help='which scheduler to use')
     parser.add_argument('--test-batch-size', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 1000)')
@@ -114,13 +116,16 @@ def main():
     writer = SummaryWriter()
 
     model = Net().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
+    if args.optimizer == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=.9)
     if args.scheduler == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, int(1e6))
     elif args.scheduler == 'step':
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.1)
     else:
-        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=True)
+        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=args.optimizer=='adam')
 
     try:
         for epoch in range(1, args.epochs + 1):

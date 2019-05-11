@@ -41,24 +41,26 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         super(FDLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if self.last_epoch == 0:
+        if self.last_epoch <= 1:
             return self.base_lrs
         ols, ors, ratios = [], [], []
         for group in self.optimizer.param_groups:
+            beta1, beta2 = group.get('betas', (0,0))
+            momentum = group.get('momentum', 0)
             for p in group['params']:
                 if self.use_mom:
                     state = self.optimizer.state[p]
                     exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
-                    beta1, beta2 = group['betas']
+                    
                     bias_correction1 = 1 - beta1 ** state['step']
                     bias_correction2 = 1 - beta2 ** state['step']
                     ol = (p.data * exp_avg).sum() / bias_correction1
                     # subtract first moment from p.data?
-                    or_ = (.5 * group['lr'] * (exp_avg_sq / bias_correction2)).sum()
+                    or_ = (.5 * (1+(beta1 or momentum)) * group['lr'] * (exp_avg_sq / bias_correction2)).sum()
                 else:
                     grad = p.grad.data
                     ol = (p.data * grad).sum()
-                    or_ = .5 * group['lr'] * grad.pow(2).sum()
+                    or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
                 ratio = ol / or_ - 1
                 ols.append(ol)
                 ors.append(or_)
@@ -66,7 +68,7 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         if self.writer:
             for data, label in ((ols, 'ol'), (ors, 'or'), (ratios, 'ratio')):
                 tensor = torch.tensor(data)
-                self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
+                #self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
                 self.writer.add_scalar(f'fd/{label}', tensor.mean(), self.last_epoch)
         if torch.tensor(ratios).mean().abs() < self.epsilon:
             factor = self.gamma
