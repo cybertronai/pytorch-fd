@@ -38,6 +38,7 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         self.gamma = gamma
         self.writer = writer
         self.use_mom = use_mom
+        self.o = []
         super(FDLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -65,12 +66,16 @@ class FDLR(optim.lr_scheduler._LRScheduler):
                 ols.append(ol)
                 ors.append(or_)
                 ratios.append(ratio)
+        ratio = torch.tensor(ratios).mean()   
+        self.o.append(ratio)
+        half_running = torch.tensor(self.o[len(self.o)//2:]).mean()
         if self.writer:
             for data, label in ((ols, 'ol'), (ors, 'or'), (ratios, 'ratio')):
                 tensor = torch.tensor(data)
                 #self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
                 self.writer.add_scalar(f'fd/{label}', tensor.mean(), self.last_epoch)
-        if torch.tensor(ratios).mean().abs() < self.epsilon:
+            self.writer.add_scalar('fd/half_running', half_running, self.last_epoch)
+        if half_running.abs() < self.epsilon:
             factor = self.gamma
         else:
             factor = 1
