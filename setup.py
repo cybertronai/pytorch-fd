@@ -15,6 +15,6 @@ setup(
         'torch>=0.4.1',
         'tqdm',
         'tensorboardX',
-        'torchvision',
+        'torchvision', 'numpy'
     ],
 )
