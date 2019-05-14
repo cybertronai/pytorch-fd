@@ -11,6 +11,8 @@ import torch.nn as nn
 import torch.optim as optim
 from tensorboardX import SummaryWriter
 
+import sys
+
 from pytorch_fd import FDLR
 
 
@@ -35,40 +37,43 @@ class SimpleNet(nn.Module):
         self.W = nn.Parameter(to_pytorch(W0))
 
     def forward(self, x):
-        Y = to_pytorch([[1, 1]])
-        err = self.W @ x.reshape((2, 1)) - Y
-        dsize = 2
-        loss = err @ err.transpose(0, 1) / dsize / 2
-        loss = loss.reshape(-1)[0]
-        return loss
+        return self.W @ x.reshape((2, 1))
 
 
 def train(model, optimizer, scheduler):
+    X = to_pytorch([[1, 0], [0, 1]])
+    Y = to_pytorch([[1, 1]])
+
     model.train()
     indices = [0, 1, 0, 1, 0, 1, 0, 1]
+
     for i in range(len(indices)):
         data = X[:, indices[i]]
-        loss = model(data)
-        print("loss", loss.item())
-        print("params", model.W.data)
+        Yt = Y[:,indices[i]]
+        Yp = model(data)
+        err = Yp - Yt
+        dsize = 2
+        loss = err @ err.transpose(0, 1) / 2
+        loss = loss.reshape(-1)[0]
+        sys.stdout.write(f"loss: {loss.item():5.4f} ")
         optimizer.zero_grad()
         loss.backward()
-        print("gradient1", model.W.grad.data)
         scheduler.step()
         optimizer.step()
-        print()
 
 
-
-X = to_pytorch([[1, 0], [0, 1]])
 
 
 def main():
     model = SimpleNet()
     writer = SummaryWriter()
 
+    print('model.W', model.W)
+    print('model.parameters', list(model.parameters()))
     optimizer = optim.SGD(model.parameters(), lr=0.5, momentum=0)
+    print('optimizer.param_groups', optimizer.param_groups)
     scheduler = FDLR(optimizer, epsilon=0, gamma=0, writer=writer, use_mom=False)
+    print('optimizer.param_groups2', optimizer.param_groups)
     train(model, optimizer, scheduler)
 
 

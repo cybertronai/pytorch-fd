@@ -2,6 +2,7 @@
 
 import collections
 import math
+import sys
 
 import torch
 import torch.optim as optim
@@ -39,12 +40,17 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         self.writer = writer
         self.use_mom = use_mom
         self.o = []
+        self.lr = 0
+        self.factor = 1
+        #        self.last_epoch = -1  # have to set here because step is called before parent sets value
         super(FDLR, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self):
-        if self.last_epoch <= 1:
-            return self.base_lrs
+    def step(self, epoch=None):
+        super(FDLR, self).step(epoch)
         ols, ors, ratios = [], [], []
+        if self.last_epoch <= 1:  # calling on init, no gradients defined yet
+            return
+        
         for group in self.optimizer.param_groups:
             beta1, beta2 = group.get('betas', (0,0))
             momentum = group.get('momentum', 0)
@@ -60,12 +66,20 @@ class FDLR(optim.lr_scheduler._LRScheduler):
                     or_ = (.5 * (1+(beta1 or momentum)) * group['lr'] * (exp_avg_sq / bias_correction2)).sum()
                 else:
                     grad = p.grad.data
+                    #                    print(p.data)
+                    #                    print(p.grad.data)
                     ol = (p.data * grad).sum()
-                    or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
+
+                    #or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
+                    #                    or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
+                    lr = 0.5
+                    or_ = 0.5 * lr * grad.pow(2).sum()
+
                 ratio = ol / or_ - 1
                 ols.append(ol)
                 ors.append(or_)
-                ratios.append(ratio)
+#                self.ratios.append(ratio)
+        print(f"ol: {ol.item():5.4f} or: {or_.item():5.4f} {grad}")
         ratio = torch.tensor(ratios).mean()   
         self.o.append(ratio)
         half_running = torch.tensor(self.o[len(self.o)//2:]).mean()
@@ -76,9 +90,16 @@ class FDLR(optim.lr_scheduler._LRScheduler):
                 self.writer.add_scalar(f'fd/{label}', tensor.mean(), self.last_epoch)
             self.writer.add_scalar('fd/half_running', half_running, self.last_epoch)
         if half_running.abs() < self.epsilon:
-            factor = self.gamma
+            self.factor = self.gamma
         else:
-            factor = 1
-        return [group['lr'] * factor
-                for group in self.optimizer.param_groups]
+            self.factor = 1
 
+
+    def get_lr(self):
+        if self.last_epoch <= 1:
+            return self.base_lrs
+
+        return [group['lr'] * self.factor
+                for group in self.optimizer.param_groups]
+    
+        
