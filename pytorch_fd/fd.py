@@ -34,15 +34,22 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, epsilon=.01, gamma=0.1, last_epoch=-1, writer: SummaryWriter = None, use_mom=False):
+    def __init__(self, optimizer, epsilon=.01, gamma=0.1, last_epoch=-1, writer: SummaryWriter = None, use_mom=False, lr=0):
         self.epsilon = epsilon
         self.gamma = gamma
         self.writer = writer
         self.use_mom = use_mom
         self.o = []
-        self.lr = 0
+        self.lr = lr
         self.factor = 1
         #        self.last_epoch = -1  # have to set here because step is called before parent sets value
+        self.ol_sum = 0
+        self.or_sum = 0
+        self.ols = []
+        self.ors = []
+        self.count = 0
+
+
         super(FDLR, self).__init__(optimizer, last_epoch)
 
     def step(self, epoch=None):
@@ -72,26 +79,33 @@ class FDLR(optim.lr_scheduler._LRScheduler):
 
                     #or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
                     #                    or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
-                    lr = 0.0025  # HACK(hardwire lr so it doesn't change)
-                    or_ = 0.5 * lr * grad.pow(2).sum()
+                    or_ = 0.5 * self.lr * grad.pow(2).sum()
 
                 ols.append(ol)
                 ors.append(or_)
 #                self.ratios.append(ratio)
 #        print(f"ol: {ol.item():5.4f} or: {or_.item():5.4f} {grad}")
         ratio = torch.tensor(ols).sum()/torch.tensor(ors).sum()
-        self.o.append(ratio)
-        half_running = torch.tensor(self.o[len(self.o)//2:]).mean()
+        ol = torch.tensor(ols).sum()
+        or_ = torch.tensor(ors).sum()
+        
+        self.ols.append(ol)
+        self.ors.append(or_)
+        
+        half_running_ol = torch.tensor(self.ols[len(self.ols)//2:]).mean()
+        half_running_or = torch.tensor(self.ors[len(self.ors)//2:]).mean()
+        
+        self.ol_sum = self.ol_sum+torch.tensor(ols).sum().item()
+        self.or_sum = self.or_sum+torch.tensor(ors).sum().item()
+        self.count += 1
         if self.writer:
-            for data, label in ((ols, 'ol'), (ors, 'or'), (ratios, 'ratio')):
-                tensor = torch.tensor(data)
-                #self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
-                self.writer.add_scalar(f'fd/{label}', tensor.sum(), self.last_epoch)
-            self.writer.add_scalar('fd/half_running', half_running, self.last_epoch)
-        if half_running.abs() < self.epsilon:
-            self.factor = self.gamma
-        else:
-            self.factor = 1
+            self.writer.add_scalar('fd/ol', torch.tensor(ols).sum(), self.last_epoch)
+            self.writer.add_scalar('fd/or', torch.tensor(ors).sum(), self.last_epoch)
+            self.writer.add_scalar('fd/ratio', ratio, self.last_epoch)
+            self.writer.add_scalar('fd/ol_half', half_running_ol, self.last_epoch)
+            self.writer.add_scalar('fd/or_half', half_running_or, self.last_epoch)
+            self.writer.add_scalar('fd/ratio_avg', self.ol_sum/self.or_sum, self.last_epoch)
+            self.writer.add_scalar('fd/ratio_half_avg', half_running_ol/half_running_or, self.last_epoch)
 
 
     def get_lr(self):
