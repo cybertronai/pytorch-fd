@@ -15,6 +15,18 @@ import sys
 
 from pytorch_fd import FDLR
 
+# Expected results
+
+# {
+#  {0.5, 0, 0.25},
+#  {0.5, 0., 0.25},
+#  {0.125, -0.25, 0.0625},
+#  {0.125, -0.25, 0.0625},
+#  {0.03125, -0.1875, 0.015625},
+#  {0.03125, -0.1875, 0.015625},
+#  {0.0078125, -0.109375, 0.00390625},
+#  {0.0078125, -0.109375, 0.00390625}
+# }
 
 def toscalar(t):  # use on python scalars/pytorch scalars
     """Converts Python scalar or PyTorch tensor to Python scalar"""
