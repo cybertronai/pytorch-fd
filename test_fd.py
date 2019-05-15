@@ -119,7 +119,7 @@ def main():
     if args.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
     else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=.9)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=.9, weight_decay=0.01)
     if args.scheduler == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, int(1e6))
     elif args.scheduler == 'step':

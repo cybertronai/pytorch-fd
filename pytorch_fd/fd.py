@@ -66,7 +66,7 @@ class FDLR(optim.lr_scheduler._LRScheduler):
                 ols.append(ol)
                 ors.append(or_)
                 ratios.append(ratio)
-        ratio = torch.tensor(ratios).mean()   
+        ratio = (torch.tensor(ols).mean() / torch.tensor(ors).mean() - 1)
         self.o.append(ratio)
         half_running = torch.tensor(self.o[len(self.o)//2:]).mean()
         if self.writer:
