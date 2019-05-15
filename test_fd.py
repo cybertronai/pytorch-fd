@@ -40,7 +40,10 @@ def train(args, model, device, train_loader, optimizer, epoch, event_writer, sch
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
+
         loss = F.nll_loss(output, target)
+        for p in model.parameters():
+            loss += 0.01*(p*p).sum()
         loss.backward()
         scheduler.step()
         optimizer.step()
@@ -76,15 +79,19 @@ def main():
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
     parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--scheduler', type=str, default='cosine', choices=['cosine', 'fd', 'step'],
+    parser.add_argument('--scheduler', type=str, default='fdlr', choices=['cosine', 'fd', 'step'],
                         help='which scheduler to use')
-    parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'],
+    parser.add_argument('--optimizer', type=str, default='sgd', choices=['adam', 'sgd'],
                         help='which scheduler to use')
     parser.add_argument('--test-batch-size', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=6, metavar='N',
+    parser.add_argument('--epochs', type=int, default=60, metavar='N',
                         help='number of epochs to train (default: 10)')
+    parser.add_argument('--save_checkpoint', action='store_true')
+    parser.add_argument('--load_checkpoint', action='store_true')
     parser.add_argument('--lr', type=float, default=0.0025, metavar='LR',
+                        help='learning rate (default: 0.0025)')
+    parser.add_argument('--momentum', type=float, default=0, metavar='LR',
                         help='learning rate (default: 0.0025)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
@@ -115,11 +122,15 @@ def main():
 
     writer = SummaryWriter()
 
-    model = Net().to(device)
+    if args.load_checkpoint:
+        model = torch.load('model.pt')
+    else:
+        model = Net()
+    model = model.to(device)
     if args.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
     else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=.9)
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     if args.scheduler == 'cosine':
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, int(1e6))
     elif args.scheduler == 'step':
@@ -133,6 +144,11 @@ def main():
             test(args, model, device, test_loader, writer, epoch)
     except KeyboardInterrupt:
         print('Exit early')
+
+    if args.save_checkpoint:
+        with open('model.pt', 'wb') as f:
+            torch.save(model, f)
+
  
 if __name__ == '__main__':
     main()

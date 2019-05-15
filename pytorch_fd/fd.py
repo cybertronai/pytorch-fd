@@ -72,22 +72,21 @@ class FDLR(optim.lr_scheduler._LRScheduler):
 
                     #or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
                     #                    or_ = .5 * (1+(beta1 or momentum)) * group['lr'] * grad.pow(2).sum()
-                    lr = 0.5
+                    lr = 0.0025  # HACK(hardwire lr so it doesn't change)
                     or_ = 0.5 * lr * grad.pow(2).sum()
 
-                ratio = ol / or_ - 1
                 ols.append(ol)
                 ors.append(or_)
 #                self.ratios.append(ratio)
-        print(f"ol: {ol.item():5.4f} or: {or_.item():5.4f} {grad}")
-        ratio = torch.tensor(ratios).mean()   
+#        print(f"ol: {ol.item():5.4f} or: {or_.item():5.4f} {grad}")
+        ratio = torch.tensor(ols).sum()/torch.tensor(ors).sum()
         self.o.append(ratio)
         half_running = torch.tensor(self.o[len(self.o)//2:]).mean()
         if self.writer:
             for data, label in ((ols, 'ol'), (ors, 'or'), (ratios, 'ratio')):
                 tensor = torch.tensor(data)
                 #self.writer.add_histogram(f'fd/{label}', tensor, self.last_epoch)
-                self.writer.add_scalar(f'fd/{label}', tensor.mean(), self.last_epoch)
+                self.writer.add_scalar(f'fd/{label}', tensor.sum(), self.last_epoch)
             self.writer.add_scalar('fd/half_running', half_running, self.last_epoch)
         if half_running.abs() < self.epsilon:
             self.factor = self.gamma
