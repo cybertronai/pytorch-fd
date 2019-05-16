@@ -43,43 +43,6 @@ def norm_squared(a):
     return (a * a).sum()
 
 
-def train(args, model, device, optimizer, epoch, event_writer, scheduler):
-    model.train()
-
-    dims = 2
-    v2 = 0.1
-    offdiag = torch.ones((dims, dims)) - torch.eye(dims)
-    offset = 0.1  # 0 means singular, 1 is standard normal
-    covmat = torch.eye(dims) + (1 - offset) * offdiag
-    mean = torch.zeros(dims)
-    mean = mean.to(device)
-    covmat = covmat.to(device)
-    Xs = MultivariateNormal(mean, covmat)
-    Ye = Normal(to_pytorch(0).to(device),
-                to_pytorch(v2).to(device))
-    wt = to_pytorch([1, 1]).to(device)
-    batch_idx = 0
-    time0 = time.time()
-    while True:
-        x = Xs.sample()
-        yerror = Ye.sample()
-        y = dot(x, wt) + yerror
-        optimizer.zero_grad()
-        loss = 0.5 * norm_squared(y - model(x))
-        if time.time()-time0>10:
-            print(loss.item())
-            time0 = time.time()
-            
-        loss.backward()
-        scheduler.step()
-        optimizer.step()
-        batch_idx += 1
-        if batch_idx % args.log_interval == 0:
-            step = (batch_idx + 1)
-            event_writer.add_scalar('loss', loss, scheduler.last_epoch)
-            event_writer.add_scalar('lr', optimizer.param_groups[0]['lr'], scheduler.last_epoch)
-
-
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
@@ -115,39 +78,52 @@ def main():
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-
     writer = SummaryWriter()
 
-    if args.load_checkpoint:
-        model = torch.load('model.pt')
-    else:
-        model = Net()
-    model = model.to(device)
+    model = Net()
     assert args.optimizer == 'sgd'
     assert args.momentum == 0
     assert args.scheduler == 'fdlr'
 
-    if args.optimizer == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
-    else:
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-    if args.scheduler == 'cosine':
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, int(1e6))
-    elif args.scheduler == 'step':
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.1)
-    else:
-        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=args.optimizer == 'adam', lr=args.lr)
+    optimizer = optim.SGD(model.parameters(), lr=0.0025, momentum=0)
+    scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer,
+                     use_mom=False, lr=args.lr)
 
-    try:
-        for epoch in range(1, args.epochs + 1):
-            train(args, model, device, optimizer, epoch, writer, scheduler)
-    except KeyboardInterrupt:
-        print('Exit early')
+    model.train()
 
-    if args.save_checkpoint:
-        with open('model.pt', 'wb') as f:
-            torch.save(model, f)
+    dims = 2
+    v2 = 0.1
+    offdiag = torch.ones((dims, dims)) - torch.eye(dims)
+    offset = 0.1  # 0 means singular, 1 is standard normal
+    covmat = torch.eye(dims) + (1 - offset) * offdiag
+    mean = torch.zeros(dims)
+    mean = mean.to(device)
+    covmat = covmat.to(device)
+    Xs = MultivariateNormal(mean, covmat)
+    Ye = Normal(to_pytorch(0).to(device),
+                to_pytorch(v2).to(device))
+    wt = to_pytorch([1, 1]).to(device)
+    batch_idx = 0
+    time0 = time.time()
+    iter = 0
+    while True:
+        x = Xs.sample()
+        yerror = Ye.sample()
+        y = dot(x, wt) + yerror
+        optimizer.zero_grad()
+        loss = 0.5 * norm_squared(y - model(x))
+        if time.time()-time0>2:
+            half = scheduler.half_running_ol/scheduler.half_running_or
+            full = scheduler.ol_sum/scheduler.or_sum
+            print(f"iter {iter:05d} loss {loss.item():.2f} half_running {half.item():.2f} full_avg {full:.2f}")
+            time0 = time.time()
+
+
+        loss.backward()
+        scheduler.step()
+        optimizer.step()
+        iter+=1
+
 
 
 if __name__ == '__main__':

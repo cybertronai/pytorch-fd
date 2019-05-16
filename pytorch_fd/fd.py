@@ -48,6 +48,8 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         self.ols = []
         self.ors = []
         self.count = 0
+        self.half_running_ol = 0
+        self.half_running_or = 0
 
 
         super(FDLR, self).__init__(optimizer, last_epoch)
@@ -92,8 +94,8 @@ class FDLR(optim.lr_scheduler._LRScheduler):
         self.ols.append(ol)
         self.ors.append(or_)
         
-        half_running_ol = torch.tensor(self.ols[len(self.ols)//2:]).mean()
-        half_running_or = torch.tensor(self.ors[len(self.ors)//2:]).mean()
+        self.half_running_ol = torch.tensor(self.ols[len(self.ols)//2:]).mean()
+        self.half_running_or = torch.tensor(self.ors[len(self.ors)//2:]).mean()
         
         self.ol_sum = self.ol_sum+torch.tensor(ols).sum().item()
         self.or_sum = self.or_sum+torch.tensor(ors).sum().item()
@@ -102,10 +104,10 @@ class FDLR(optim.lr_scheduler._LRScheduler):
             self.writer.add_scalar('fd/ol', torch.tensor(ols).sum(), self.last_epoch)
             self.writer.add_scalar('fd/or', torch.tensor(ors).sum(), self.last_epoch)
             self.writer.add_scalar('fd/ratio', ratio, self.last_epoch)
-            self.writer.add_scalar('fd/ol_half', half_running_ol, self.last_epoch)
-            self.writer.add_scalar('fd/or_half', half_running_or, self.last_epoch)
+            self.writer.add_scalar('fd/ol_half', self.half_running_ol, self.last_epoch)
+            self.writer.add_scalar('fd/or_half', self.half_running_or, self.last_epoch)
             self.writer.add_scalar('fd/ratio_avg', self.ol_sum/self.or_sum, self.last_epoch)
-            self.writer.add_scalar('fd/ratio_half_avg', half_running_ol/half_running_or, self.last_epoch)
+            self.writer.add_scalar('fd/ratio_half_avg', self.half_running_ol/self.half_running_or, self.last_epoch)
 
 
     def get_lr(self):
