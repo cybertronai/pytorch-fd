@@ -58,16 +58,15 @@ def main():
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--save-checkpoint', action='store_true')
     parser.add_argument('--load-checkpoint', action='store_true')
-    parser.add_argument('--lr', type=float, default=0.05, metavar='LR',
-                        help='learning rate (default: 0.0025)')
-    parser.add_argument('--momentum', type=float, default=0, metavar='LR',
-                        help='learning rate (default: 0.0025)')
+    parser.add_argument('--lr', type=float, default=0.05, metavar='LR')
+    parser.add_argument('--momentum', type=float, default=0, metavar='LR')
     parser.add_argument('--seed', type=int, default=2, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
     parser.add_argument('--use-least-squares', type=int, default=1,
                         help='use least squares instead of cross entropy')
+    parser.add_argument('--y-variance', type=float, default=0.01)
     parser.add_argument('--run', type=str, default='fd',
                         help='name of logging run')
 
@@ -81,18 +80,16 @@ def main():
     writer = SummaryWriter()
 
     model = Net()
-    assert args.optimizer == 'sgd'
-    assert args.momentum == 0
-    assert args.scheduler == 'fdlr'
 
-    optimizer = optim.SGD(model.parameters(), lr=0.0025, momentum=0)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0)
     scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer,
                      use_mom=False, lr=args.lr)
 
+    model = model.to(device)
     model.train()
 
     dims = 2
-    v2 = 0.1
+    v2 = args.y_variance
     offdiag = torch.ones((dims, dims)) - torch.eye(dims)
     offset = 0.1  # 0 means singular, 1 is standard normal
     covmat = torch.eye(dims) + (1 - offset) * offdiag
@@ -115,7 +112,7 @@ def main():
         if time.time()-time0>2:
             half = scheduler.half_running_ol/scheduler.half_running_or
             full = scheduler.ol_sum/scheduler.or_sum
-            print(f"iter {iter:05d} loss {loss.item():.2f} half_running {half.item():.2f} full_avg {full:.2f}")
+            print(f"iter {iter:06d} loss {loss.item():.2f} half_running {half.item():.2f} full_avg {full:.2f}")
             time0 = time.time()
 
 
