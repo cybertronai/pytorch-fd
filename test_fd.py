@@ -15,12 +15,26 @@ from torchvision import datasets, transforms
 from pytorch_fd import FDLR
 
 
+def one_hot_embedding(labels, num_classes):
+    """Embedding labels to one-hot form.
+
+    Args:
+      labels: (LongTensor) class labels, sized [N,].
+      num_classes: (int) number of classes.
+
+    Returns:
+      (tensor) encoded labels, sized [N, #classes].
+    """
+    y = torch.eye(num_classes)
+    return y[labels]
+
+
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(1, 20, 5, 1)
         self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4*4*50, 500)
+        self.fc1 = nn.Linear(4 * 4 * 50, 500)
         self.fc2 = nn.Linear(500, 10)
 
     def forward(self, x):
@@ -28,11 +42,12 @@ class Net(nn.Module):
         x = F.max_pool2d(x, 2, 2)
         x = F.relu(self.conv2(x))
         x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4*4*50)
+        x = x.view(-1, 4 * 4 * 50)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
-    
+
+
 def train(args, model, device, train_loader, optimizer, epoch, event_writer, scheduler):
     model.train()
     tqdm_bar = tqdm.tqdm(train_loader)
@@ -41,20 +56,25 @@ def train(args, model, device, train_loader, optimizer, epoch, event_writer, sch
         optimizer.zero_grad()
         output = model(data)
 
-        loss = F.nll_loss(output, target)
-        for p in model.parameters():
-            loss += 0.01*(p*p).sum()
+        if args.use_least_squares:
+            target2 = one_hot_embedding(target, 10)
+            target2 = target2.to(device)
+            loss = F.mse_loss(output, target2)
+        else:
+            loss = F.nll_loss(output, target)
+
         loss.backward()
         scheduler.step()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            step = (batch_idx+1) * len(data) + (epoch-1) * len(train_loader.dataset)
+            step = (batch_idx + 1) * len(data) + (epoch - 1) * len(train_loader.dataset)
             event_writer.add_scalar('loss', loss, scheduler.last_epoch)
             event_writer.add_scalar('lr', optimizer.param_groups[0]['lr'], scheduler.last_epoch)
             tqdm_bar.set_description(
                 f'Train epoch {epoch} Loss: {loss.item():.6f}')
 
-def test(args, model, device, test_loader, event_writer:SummaryWriter, epoch):
+
+def test(args, model, device, test_loader, event_writer: SummaryWriter, epoch):
     model.eval()
     test_loss = 0
     correct = 0
@@ -62,8 +82,8 @@ def test(args, model, device, test_loader, event_writer:SummaryWriter, epoch):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item() # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True) # get the index of the max log-probability
+            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
@@ -73,6 +93,7 @@ def test(args, model, device, test_loader, event_writer:SummaryWriter, epoch):
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * acc))
+
 
 def main():
     # Training settings
@@ -87,8 +108,8 @@ def main():
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=60, metavar='N',
                         help='number of epochs to train (default: 10)')
-    parser.add_argument('--save_checkpoint', action='store_true')
-    parser.add_argument('--load_checkpoint', action='store_true')
+    parser.add_argument('--save-checkpoint', action='store_true')
+    parser.add_argument('--load-checkpoint', action='store_true')
     parser.add_argument('--lr', type=float, default=0.0025, metavar='LR',
                         help='learning rate (default: 0.0025)')
     parser.add_argument('--momentum', type=float, default=0, metavar='LR',
@@ -97,7 +118,11 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
-    
+    parser.add_argument('--use-least-squares', type=int, default=1,
+                        help='use least squares instead of cross entropy')
+    parser.add_argument('--run', type=str, default='fd',
+                        help='name of logging run')
+
     args = parser.parse_args()
     use_cuda = torch.cuda.is_available()
 
@@ -115,9 +140,9 @@ def main():
         batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(
         datasets.MNIST('../data', train=False, transform=transforms.Compose([
-                           transforms.ToTensor(),
-                           transforms.Normalize((0.1307,), (0.3081,))
-                       ])),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])),
         batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
     writer = SummaryWriter()
@@ -127,6 +152,9 @@ def main():
     else:
         model = Net()
     model = model.to(device)
+    assert args.optimizer == 'sgd'
+    assert args.momentum == 0
+
     if args.optimizer == 'adam':
         optimizer = optim.Adam(model.parameters(), lr=args.lr, betas=(.9, .99))
     else:
@@ -136,7 +164,7 @@ def main():
     elif args.scheduler == 'step':
         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=200, gamma=0.1)
     else:
-        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=args.optimizer=='adam')
+        scheduler = FDLR(optimizer, epsilon=.01, gamma=0.1, writer=writer, use_mom=args.optimizer == 'adam')
 
     try:
         for epoch in range(1, args.epochs + 1):
@@ -149,6 +177,6 @@ def main():
         with open('model.pt', 'wb') as f:
             torch.save(model, f)
 
- 
+
 if __name__ == '__main__':
     main()
