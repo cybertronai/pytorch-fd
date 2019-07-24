@@ -10,12 +10,3 @@ pip install -e .
 python test_fd.py
 tensorboard --logdir=runs
 ```
-
-## Sample results
-Green: `python test_fd.py --batch-size=512 --log-interval=30 --scheduler=fd`
-
-Blue: `python test_fd.py --batch-size=512 --log-interval=30 --optimizer=cosine`
-![](images/loss.png)
-
-
-![](images/histogram.png)
